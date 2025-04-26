@@ -16,11 +16,6 @@ load_dotenv()
 PRACTICUM_TOKEN = os.getenv('PRACTICUM_TOKEN')
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
-ENV_VARS = {
-    'PRACTICUM_TOKEN': PRACTICUM_TOKEN,
-    'TELEGRAM_TOKEN': TELEGRAM_TOKEN,
-    'TELEGRAM_CHAT_ID': TELEGRAM_CHAT_ID,
-}
 
 RETRY_PERIOD = 600
 ENDPOINT = 'https://practicum.yandex.ru/api/user_api/homework_statuses/'
@@ -42,7 +37,12 @@ logger.addHandler(handler)
 
 def check_tokens():
     """Проверка доступности переменных окружения."""
-    for key, var in ENV_VARS.items():
+    env_vars = {
+        'PRACTICUM_TOKEN': PRACTICUM_TOKEN,
+        'TELEGRAM_TOKEN': TELEGRAM_TOKEN,
+        'TELEGRAM_CHAT_ID': TELEGRAM_CHAT_ID,
+    }
+    for key, var in env_vars.items():
         if var is None:
             message = (
                 f'Отсутствует обязательная переменная окружения: "{key}".\n'
@@ -127,9 +127,8 @@ def main():
         try:
             response = get_api_answer(timestamp)
             check_response(response)
-            message = parse_status(response['homeworks'])
-            if message:
-                send_message(bot, message)
+            if response['homeworks']:
+                send_message(bot, parse_status(response['homeworks'][0]))
             else:
                 logger.debug('Статус проверки домашней работы не изменился.')
         except Exception as error:
