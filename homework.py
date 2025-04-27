@@ -2,14 +2,14 @@ import logging
 import os
 import sys
 import time
+from functools import lru_cache
 from http import HTTPStatus
 
 import requests
 from dotenv import load_dotenv
-from telebot import TeleBot
+from telebot import apihelper, TeleBot
 
-from exceptions import (DateError, StatusError, UnavailableEndpointError,
-                        WrongTokenError)
+from exceptions import UnavailableEndpointError
 
 load_dotenv()
 
@@ -42,77 +42,65 @@ def check_tokens():
         'TELEGRAM_TOKEN': TELEGRAM_TOKEN,
         'TELEGRAM_CHAT_ID': TELEGRAM_CHAT_ID,
     }
-    for key, var in env_vars.items():
-        if var is None:
-            message = (
-                f'Отсутствует обязательная переменная окружения: "{key}".\n'
-                f'Программа принудительно остановлена.'
-            )
-            logger.critical(message)
-            sys.exit(message)
+    absent_env_vars = [key for key, var in env_vars.items() if var is None]
+    if absent_env_vars:
+        message = ('Отсутствуют следующие обязательные переменные окружения: '
+                   f'"{', '.join(absent_env_vars)}".\n'
+                   'Программа принудительно остановлена.')
+        logger.critical(message)
+        raise ValueError(message)
 
 
+@lru_cache(maxsize=1)
 def send_message(bot, message):
     """Отправляет сообщение в соответствующий Telegram-чат."""
-    try:
-        bot.send_message(TELEGRAM_CHAT_ID, message)
-        logger.debug(f'Бот отправил сообщение: "{message}".')
-    except Exception:
-        logger.error('Сбой при отправке сообщения в Telegram.')
+    bot.send_message(TELEGRAM_CHAT_ID, message)
+    logger.debug(f'Бот отправил сообщение: "{message}".')
 
 
 def get_api_answer(timestamp):
     """Запрос к API-сервису."""
     params = {'from_date': timestamp}
+    logger.debug(f'Отправка запроса по адресу {ENDPOINT} '
+                 f'с параметром from_date = {timestamp}.')
     try:
         response = requests.get(ENDPOINT, params=params, headers=HEADERS)
-        if response.status_code == HTTPStatus.OK:
-            return response.json()
-        else:
-            raise UnavailableEndpointError(endpoint=ENDPOINT)
-    except Exception:
-        raise UnavailableEndpointError(endpoint=ENDPOINT)
+    except requests.RequestException as error:
+        raise UnavailableEndpointError(error)
+    if response.status_code != HTTPStatus.OK:
+        raise UnavailableEndpointError(f'Эндпойнт {ENDPOINT} недоступен.')
+    else:
+        return response.json()
 
 
 def check_response(response):
-    """
-    Проверка корректности ответа API-сервиса.
-    Ответ сервиса при отправки некорректных данных в параметре from_date:
-    {
-        'code': 'UnknownError',
-        'error': {'error': 'Wrong from_date format'}
-    }.
-    Ответ сервиса при запросе с недействительным токеном:
-    {
-        'code': 'not_authenticated',
-        'message': 'Учетные данные не были предоставлены.',
-        'source': '__response__'
-    }.
-    """
+    """Проверка корректности ответа API-сервиса."""
     if not isinstance(response, dict):
-        raise TypeError('Получен некорректный тип данных в ответе API.')
-    elif 'error' in response:
-        raise DateError
-    elif 'message' in response:
-        raise WrongTokenError
+        raise TypeError('Получен некорректный тип данных '
+                        f'{type(response)} в ответе API.')
     elif 'homeworks' not in response:
-        raise KeyError('Отсутствуют ожидаемые ключи в ответе API.')
+        raise ValueError('Отсутствует ключ "homeworks" в ответе API.')
     elif not isinstance(response['homeworks'], list):
-        raise TypeError('Некорректный тип данных '
-                        'под ключом "homeworks" в ответе API.')
+        raise TypeError(
+            (f'Некорректный тип данных {type(response['homeworks'])} '
+             'под ключом "homeworks" в ответе API.')
+        )
 
 
 def parse_status(homework):
     """Возвращает информацию об изменении статуса проверки домашней работы."""
-    if homework:
-        try:
-            homework_name = homework['homework_name']
-        except KeyError:
-            raise KeyError('Отсутствует ключ "homework_name" в ответе API.')
-        try:
-            verdict = HOMEWORK_VERDICTS[homework['status']]
-        except KeyError:
-            raise StatusError
+    homework_name = homework.get('homework_name')
+    status = homework.get('status')
+    verdict = HOMEWORK_VERDICTS.get(status)
+    absent_keys_messages = [f'отсутствует ключ "{key}" в словаре "homework"'
+                            for key in ('homework_name', 'status')
+                            if key not in homework]
+    if status and not verdict:
+        absent_keys_messages.append(f'неожиданный статус проверки {status}')
+    if absent_keys_messages:
+        raise ValueError('Обнаружены следующие ошибки в ответе API: '
+                         f'{', '.join(absent_keys_messages)}.')
+    else:
         return f'Изменился статус проверки работы "{homework_name}". {verdict}'
 
 
@@ -121,23 +109,31 @@ def main():
     check_tokens()
     bot = TeleBot(TELEGRAM_TOKEN)
     timestamp = int(time.time())
-    last_error_message = ''
 
     while True:
         try:
             response = get_api_answer(timestamp)
             check_response(response)
-            if response['homeworks']:
-                send_message(bot, parse_status(response['homeworks'][0]))
-            else:
+            homeworks = response['homeworks']
+            message = parse_status(homeworks[0]) if homeworks else None
+            if not message:
                 logger.debug('Статус проверки домашней работы не изменился.')
+                continue
+            else:
+                send_message(bot, message)
+            timestamp = response.get('current_date', timestamp)
+        except (apihelper.ApiException, requests.exceptions.RequestException):
+            logger.exception('Сбой при отправке сообщения в Telegram.')
         except Exception as error:
             message = f'Сбой в работе программы. {error}'
-            logger.error(message)
-            if message != last_error_message:
+            logger.exception(message)
+            try:
                 send_message(bot, message)
-                last_error_message = message
-        time.sleep(RETRY_PERIOD)
+            except (apihelper.ApiException,
+                    requests.exceptions.RequestException):
+                logger.exception('Сбой при отправке сообщения в Telegram.')
+        finally:
+            time.sleep(RETRY_PERIOD)
 
 
 if __name__ == '__main__':
