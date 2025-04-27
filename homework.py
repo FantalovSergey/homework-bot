@@ -67,10 +67,13 @@ def get_api_answer(timestamp):
         response = requests.get(ENDPOINT, params=params, headers=HEADERS)
     except requests.RequestException as error:
         raise UnavailableEndpointError(error)
-    if response.status_code != HTTPStatus.OK:
-        raise UnavailableEndpointError(f'Эндпойнт {ENDPOINT} недоступен.')
-    else:
-        return response.json()
+    status_code = response.status_code
+    if status_code != HTTPStatus.OK:
+        raise UnavailableEndpointError(
+            (f'Ошибка при запросе к эндпойнту {ENDPOINT}. '
+             f'Код ответа API: {status_code}.')
+        )
+    return response.json()
 
 
 def check_response(response):
@@ -89,19 +92,19 @@ def check_response(response):
 
 def parse_status(homework):
     """Возвращает информацию об изменении статуса проверки домашней работы."""
-    homework_name = homework.get('homework_name')
-    status = homework.get('status')
+    absent_keys = [f'"{key}"' for key in ('homework_name', 'status')
+                   if key not in homework]
+    if absent_keys:
+        raise KeyError(
+            ('В ответе API в словаре "homework" отсутствуют следующие ключи: '
+             f'{', '.join(absent_keys)}.')
+        )
+    homework_name = homework['homework_name']
+    status = homework['status']
     verdict = HOMEWORK_VERDICTS.get(status)
-    absent_keys_messages = [f'отсутствует ключ "{key}" в словаре "homework"'
-                            for key in ('homework_name', 'status')
-                            if key not in homework]
-    if status and not verdict:
-        absent_keys_messages.append(f'неожиданный статус проверки {status}')
-    if absent_keys_messages:
-        raise ValueError('Обнаружены следующие ошибки в ответе API: '
-                         f'{', '.join(absent_keys_messages)}.')
-    else:
-        return f'Изменился статус проверки работы "{homework_name}". {verdict}'
+    if not verdict:
+        raise ValueError(f'Неожиданный статус проверки {status} в ответе API.')
+    return f'Изменился статус проверки работы "{homework_name}". {verdict}'
 
 
 def main():
@@ -119,8 +122,7 @@ def main():
             if not message:
                 logger.debug('Статус проверки домашней работы не изменился.')
                 continue
-            else:
-                send_message(bot, message)
+            send_message(bot, message)
             timestamp = response.get('current_date', timestamp)
         except (apihelper.ApiException, requests.exceptions.RequestException):
             logger.exception('Сбой при отправке сообщения в Telegram.')
