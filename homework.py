@@ -4,6 +4,7 @@ import sys
 import time
 from functools import lru_cache
 from http import HTTPStatus
+from typing import Dict
 
 import requests
 from dotenv import load_dotenv
@@ -58,7 +59,7 @@ def send_message(bot, message):
     logger.debug(f'Бот отправил сообщение: "{message}".')
 
 
-def get_api_answer(timestamp):
+def get_api_answer(timestamp: int) -> Dict:
     """Запрос к API-сервису."""
     params = {'from_date': timestamp}
     logger.debug(f'Отправка запроса по адресу {ENDPOINT} '
@@ -76,7 +77,7 @@ def get_api_answer(timestamp):
     return response.json()
 
 
-def check_response(response):
+def check_response(response: Dict):
     """Проверка корректности ответа API-сервиса."""
     if not isinstance(response, dict):
         raise TypeError('Получен некорректный тип данных '
@@ -90,8 +91,8 @@ def check_response(response):
         )
 
 
-def parse_status(homework):
-    """Возвращает информацию об изменении статуса проверки домашней работы."""
+def parse_status(homework: Dict) -> str:
+    """Получение информации об изменении статуса проверки домашней работы."""
     absent_keys = [f'"{key}"' for key in ('homework_name', 'status')
                    if key not in homework]
     if absent_keys:
