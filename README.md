@@ -12,20 +12,28 @@ git clone https://github.com/FantalovSergey/homework-bot.git
 cd homework-bot
 ```
 
-Cоздайте и активировуйте виртуальное окружение:
+Cоздайте и активируйте виртуальное окружение:
 
 ```
-python -m venv venv
+python3 -m venv venv
 ```
 
-```
-source venv/bin/activate
-```
+* Для Linux/macOS
+
+    ```
+    source venv/bin/activate
+    ```
+
+* Для Windows
+
+    ```
+    venv\Scripts\activate
+    ```
 
 Установите зависимости из файла requirements.txt:
 
 ```
-python -m pip install --upgrade pip
+python3 -m pip install --upgrade pip
 ```
 
 ```
@@ -35,7 +43,7 @@ pip install -r requirements.txt
 # Стек
 - Python 3.12.7
 - pyTelegramBotAPI
-- pytest-django
+- pytest
 
 # Об авторе
 Студент факультета Бэкенд платформы Яндекс.Практикум [Фанталов Сергей](https://github.com/FantalovSergey).
